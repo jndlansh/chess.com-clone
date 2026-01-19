@@ -15,6 +15,7 @@ const Game = () => {
     const [chess, setChess] = useState(new Chess());
     const [board, setBoard] = useState(chess.board());
     const [started,setStarted] = useState(false);
+    const [playerColor, setPlayerColor] = useState<'white' | 'black' | null>(null);
 
     useEffect(() => {
         if(!socket) return;
@@ -24,6 +25,7 @@ const Game = () => {
 
             switch (message.type) {
                 case INIT_GAME:
+                    setPlayerColor(message.payload.color);
                     setBoard(chess.board());
                     setStarted(true);
                     break;
@@ -45,7 +47,7 @@ const Game = () => {
         <div className="pt-8 max-w-4xl w-full">
             <div className="grid grid-cols-6 gap-4 w-full">
                 <div className="col-span-4 w-full">
-                    <Chessboard chess={chess} board={board} socket={socket} setBoard={setBoard} />
+                    <Chessboard chess={chess} board={board} socket={socket} setBoard={setBoard} playerColor={playerColor} />
                 </div>
                 <div className="col-span-2 bg-slate-700 w-full">
                     <div className='pt-8'>
