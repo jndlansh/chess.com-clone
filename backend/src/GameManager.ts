@@ -1,47 +1,92 @@
 import WebSocket from "ws";
 import { Game } from "./Game.js";
 import { INIT_GAME, MOVE } from "./messages.js";
+
+interface UserSocket extends WebSocket {
+    userId: string;
+}
+
 export class GameManager {
-    private games : Game[];
-    private pendingUser : WebSocket | null;
-    private users : WebSocket[];
+    private games: Game[];
+    private pendingUser: UserSocket | null;
+    private users: Map<string, UserSocket>;
 
     constructor() {
         this.games = [];
         this.pendingUser = null;
-        this.users = [];
-    }
-    addUser(socket: WebSocket){
-        this.users.push(socket);
-        this.addHandler(socket);
+        this.users = new Map();
     }
 
-    removeUser(socket : WebSocket){
-        this.users = this.users.filter(user => user !== socket);
+    addUser(socket: WebSocket, userId: string) {
+        const userSocket = socket as UserSocket;
+        userSocket.userId = userId;
+        this.users.set(userId, userSocket);
+        this.addHandler(userSocket);
     }
 
-    private addHandler(socket: WebSocket){
+    removeUser(socket: WebSocket) {
+        const userSocket = socket as UserSocket;
+        this.users.delete(userSocket.userId);
+        
+        // Remove from pending if waiting
+        if (this.pendingUser === userSocket) {
+            this.pendingUser = null;
+        }
+
+        // Remove from any active games as spectator
+        this.games.forEach(game => {
+            game.removeSpectator(userSocket);
+        });
+    }
+
+    private addHandler(socket: UserSocket) {
         socket.on("message", (data) => {
             const message = JSON.parse(data.toString());
 
-            if(message.type === INIT_GAME){
-                if(this.pendingUser){
-                    const game = new Game(this.pendingUser, socket);
+            if (message.type === INIT_GAME) {
+                if (this.pendingUser && this.pendingUser.userId !== socket.userId) {
+                    // Create a new game
+                    const game = new Game(
+                        this.pendingUser,
+                        socket,
+                        this.pendingUser.userId,
+                        socket.userId
+                    );
                     this.games.push(game);
                     this.pendingUser = null;
-                }else{
+                } else {
+                    // Add to waiting queue
                     this.pendingUser = socket;
+                    socket.send(JSON.stringify({
+                        type: 'WAITING',
+                        payload: { message: 'Waiting for opponent...' }
+                    }));
                 }
             }
 
             if (message.type === MOVE) {
-                console.log("inside move")
-                const game = this.games.find(game => game.player1 === socket || game.player2 === socket);
+                const game = this.games.find(
+                    game => game.player1 === socket || game.player2 === socket
+                );
                 if (game) {
-                    console.log("inside makemove")
                     game.makeMove(socket, message.payload.move);
                 }
             }
-        })
+
+            if (message.type === 'SPECTATE') {
+                const gameId = message.payload.gameId;
+                const game = this.games.find(g => g.gameId === gameId);
+                if (game) {
+                    game.addSpectator(socket);
+                }
+            }
+        });
+    }
+
+    getActiveGames() {
+        return this.games.map(game => ({
+            gameId: game.gameId,
+            spectatorCount: game.spectators.size
+        }));
     }
 }

@@ -1,0 +1,45 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  username      String   @unique
+  password      String
+  rating        Int      @default(1200)
+  gamesAsWhite  Game[]   @relation("WhitePlayer")
+  gamesAsBlack  Game[]   @relation("BlackPlayer")
+  createdAt     DateTime @default(now())
+}
+
+model Game {
+  id            String     @id @default(uuid())
+  whitePlayerId String
+  blackPlayerId String
+  whitePlayer   User       @relation("WhitePlayer", fields: [whitePlayerId], references: [id])
+  blackPlayer   User       @relation("BlackPlayer", fields: [blackPlayerId], references: [id])
+  pgn           String     @default("")
+  fen           String     @default("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+  status        GameStatus @default(IN_PROGRESS)
+  result        String?
+  startTime     DateTime   @default(now())
+  endTime       DateTime?
+  spectators    String[]   @default([])
+  moves         Json[]     @default([])
+}
+
+enum GameStatus {
+  WAITING
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}

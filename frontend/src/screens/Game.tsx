@@ -1,5 +1,5 @@
 import { Button } from '../components/Button'
-import { Chessboard } from '../components/chessboard'
+import { Chessboard } from '../components/Chessboard'
 import { useSocket } from '../hooks/useSocket'
 import { useEffect, useState } from 'react'
 import { Chess } from 'chess.js'
@@ -42,12 +42,12 @@ const Game = () => {
     if(!socket) return <div>Connecting to server...</div>
 
     return <div className="justify-center flex">
-        <div className="pt-8 max-w-screen-lg w-full">
-            <div className="grid grid-cols-6 gap-4 w-full bg-red-400">
-                <div className="col-span-4 bg-red-200 w-full">
+        <div className="pt-8 max-w-4xl w-full">
+            <div className="grid grid-cols-6 gap-4 w-full">
+                <div className="col-span-4 w-full">
                     <Chessboard chess={chess} board={board} socket={socket} setBoard={setBoard} />
                 </div>
-                <div className="col-span-2 bg-green-200 w-full">
+                <div className="col-span-2 bg-slate-700 w-full">
                     <div className='pt-8'>
                         {!started && <Button onClick={() => {
                             socket.send(JSON.stringify({
