@@ -9,8 +9,15 @@ export declare class Game {
     board: Chess;
     spectators: Set<WebSocket>;
     private moveCount;
-    constructor(player1: WebSocket, player2: WebSocket, player1Id: string, player2Id: string, gameId?: string);
+    private whiteTime;
+    private blackTime;
+    private lastMoveTime;
+    private timerInterval?;
+    constructor(player1: WebSocket, player2: WebSocket, player1Id: string, player2Id: string, timeControl?: number, gameId?: string);
     private generateGameId;
+    private startTimer;
+    private broadcastTime;
+    private timeOut;
     saveGame(): Promise<void>;
     addSpectator(socket: WebSocket): void;
     removeSpectator(socket: WebSocket): void;

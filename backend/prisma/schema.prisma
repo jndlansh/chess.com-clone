@@ -35,6 +35,9 @@ model Game {
   endTime       DateTime?
   spectators    String[]   @default([])
   moves         Json[]     @default([])
+  timeControl   Int      @default(600000)  // milliseconds
+  whiteTimeLeft Int?     // remaining time
+  blackTimeLeft Int?
 }
 
 enum GameStatus {

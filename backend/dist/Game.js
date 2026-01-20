@@ -12,13 +12,21 @@ export class Game {
     board;
     spectators = new Set();
     moveCount = 0;
-    constructor(player1, player2, player1Id, player2Id, gameId) {
+    whiteTime; // in milliseconds
+    blackTime;
+    lastMoveTime;
+    timerInterval;
+    constructor(player1, player2, player1Id, player2Id, timeControl = 600000, gameId) {
         this.player1 = player1;
         this.player2 = player2;
         this.player1Id = player1Id;
         this.player2Id = player2Id;
         this.board = new Chess();
         this.gameId = gameId || this.generateGameId();
+        this.whiteTime = timeControl;
+        this.blackTime = timeControl;
+        this.lastMoveTime = new Date();
+        this.startTimer();
         // Save game to database
         this.saveGame();
         // Notify players
@@ -39,6 +47,65 @@ export class Game {
     }
     generateGameId() {
         return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    }
+    startTimer() {
+        this.timerInterval = setInterval(() => {
+            const now = new Date();
+            const elapsed = now.getTime() - this.lastMoveTime.getTime();
+            // Deduct time from current player
+            if (this.moveCount % 2 === 0) {
+                this.whiteTime -= elapsed;
+                if (this.whiteTime <= 0) {
+                    this.timeOut('black');
+                }
+            }
+            else {
+                this.blackTime -= elapsed;
+                if (this.blackTime <= 0) {
+                    this.timeOut('white');
+                }
+            }
+            this.lastMoveTime = now;
+            // Broadcast time update
+            this.broadcastTime();
+        }, 100); // Update every 100ms
+    }
+    broadcastTime() {
+        const timeUpdate = JSON.stringify({
+            type: 'TIME_UPDATE',
+            payload: {
+                whiteTime: Math.max(0, this.whiteTime),
+                blackTime: Math.max(0, this.blackTime)
+            }
+        });
+        this.player1.send(timeUpdate);
+        this.player2.send(timeUpdate);
+        this.spectators.forEach(s => s.send(timeUpdate));
+    }
+    async timeOut(winner) {
+        if (this.timerInterval) {
+            clearInterval(this.timerInterval);
+        }
+        // Update database
+        await prisma.game.update({
+            where: { id: this.gameId },
+            data: {
+                status: 'COMPLETED',
+                result: winner,
+                endTime: new Date()
+            }
+        });
+        await this.updateRatings(winner);
+        const message = JSON.stringify({
+            type: GAME_OVER,
+            payload: {
+                winner,
+                reason: 'timeout'
+            }
+        });
+        this.player1.send(message);
+        this.player2.send(message);
+        this.spectators.forEach(s => s.send(message));
     }
     async saveGame() {
         try {
@@ -98,6 +165,7 @@ export class Game {
         try {
             // Make the move
             this.board.move(move);
+            this.lastMoveTime = new Date(); // Reset timer for next player
             // Save to database
             await this.saveGame();
             // Broadcast to all participants (both players and spectators)
@@ -129,6 +197,9 @@ export class Game {
     }
     async endGame() {
         let result;
+        if (this.timerInterval) {
+            clearInterval(this.timerInterval);
+        }
         if (this.board.isCheckmate()) {
             result = this.board.turn() === 'w' ? 'black' : 'white';
         }

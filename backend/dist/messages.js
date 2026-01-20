@@ -4,4 +4,5 @@ export const GAME_OVER = 'game_over';
 export const WAITING = 'WAITING';
 export const SPECTATE = 'SPECTATE';
 export const ERROR = 'ERROR';
+export const TIME_UPDATE = 'TIME_UPDATE';
 //# sourceMappingURL=messages.js.map
