@@ -11,9 +11,9 @@ export class Game {
     player2Id;
     board;
     spectators = new Set();
-    moveCount = 0;
     whiteTime; // in milliseconds
     blackTime;
+    moveCount = 0;
     lastMoveTime;
     timerInterval;
     constructor(player1, player2, player1Id, player2Id, timeControl = 600000, gameId) {
@@ -118,12 +118,17 @@ export class Game {
                     pgn: this.board.pgn(),
                     fen: this.board.fen(),
                     status: 'IN_PROGRESS',
-                    moves: []
+                    moves: [],
+                    whiteTimeLeft: this.whiteTime,
+                    blackTimeLeft: this.blackTime,
+                    timeControl: this.whiteTime
                 },
                 update: {
                     pgn: this.board.pgn(),
                     fen: this.board.fen(),
-                    moves: this.board.history({ verbose: true })
+                    moves: this.board.history({ verbose: true }),
+                    whiteTimeLeft: this.whiteTime,
+                    blackTimeLeft: this.blackTime
                 }
             });
         }
@@ -173,9 +178,9 @@ export class Game {
                 type: MOVE,
                 payload: move
             });
-            // Send to the other player
-            const otherPlayer = socket === this.player1 ? this.player2 : this.player1;
-            otherPlayer.send(moveMessage);
+            // Send to BOTH players (not just the other player)
+            this.player1.send(moveMessage);
+            this.player2.send(moveMessage);
             // Send to all spectators
             this.spectators.forEach(spectator => {
                 spectator.send(moveMessage);

@@ -4,7 +4,8 @@ export declare class GameManager {
     private pendingUser;
     private users;
     constructor();
-    addUser(socket: WebSocket, userId: string): void;
+    addUser(socket: WebSocket, userId: string): Promise<void>;
+    private reconnectToActiveGame;
     removeUser(socket: WebSocket): void;
     private addHandler;
     getActiveGames(): {

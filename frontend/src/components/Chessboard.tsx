@@ -2,13 +2,14 @@ import { Chess, type Color, type PieceSymbol, type Square } from 'chess.js';
 import React, { useState } from 'react'
 import { MOVE } from '../screens/Game';
 
-export const Chessboard = ({ chess, board, socket, setBoard, playerColor }: {
+export const Chessboard = ({ chess, board, socket, setBoard, setChess, playerColor }: {
   chess: Chess;
   setBoard: React.Dispatch<React.SetStateAction<({
     square: Square;
     type: PieceSymbol;
     color: Color
   } | null)[][]>>;
+  setChess: React.Dispatch<React.SetStateAction<Chess>>;
   board: ({
     square: Square;
     type: PieceSymbol;
@@ -32,29 +33,54 @@ export const Chessboard = ({ chess, board, socket, setBoard, playerColor }: {
           const squareRepresentation = String.fromCharCode(97 + boardCol) + "" + (8 - boardRow) as Square;
 
           return <div onClick={() => {
+            if (!playerColor) return; // Can't move if color not assigned
+            
             if (!from) {
-              setFrom(squareRepresentation);
+              // Only allow selecting pieces of player's color
+              if (square && square.color === playerColor.charAt(0)) {
+                setFrom(squareRepresentation);
+              }
             } else {
-              socket.send(JSON.stringify({
-                type: MOVE,
-                payload: {
-                  move: {
-                    from, 
-                    to: squareRepresentation
-                  }
-                }
-              }))
+              // Check if it's the player's turn
+              const currentTurn = chess.turn();
+              const playerTurn = playerColor === 'white' ? 'w' : 'b';
+              
+              if (currentTurn !== playerTurn) {
+                setFrom(null);
+                return;
+              }
 
-              setFrom(null);
-              chess.move({
-                from,
-                to: squareRepresentation
-              });
-              setBoard(chess.board());
-              console.log({
-                from,
-                to: squareRepresentation
-              });
+              // Validate move before sending
+              try {
+                // Create a new chess instance to test the move
+                const testChess = new Chess(chess.fen());
+                const move = testChess.move({
+                  from,
+                  to: squareRepresentation
+                });
+                
+                if (move) {
+                  // Valid move, send to server
+                  socket.send(JSON.stringify({
+                    type: MOVE,
+                    payload: {
+                      move: {
+                        from, 
+                        to: squareRepresentation
+                      }
+                    }
+                  }));
+                  
+                  // Wait for server confirmation - don't update optimistically
+                  setFrom(null);
+                } else {
+                  // Invalid move, reset
+                  setFrom(null);
+                }
+              } catch (e) {
+                // Move failed, undo and reset
+                setFrom(null);
+              }
             }
           }} key={j} className={`w-16 h-16 ${(i + j) % 2 === 0 ? 'bg-[#69923e]' : 'bg-[#fffcb7]'}`}>
             <div className="w-full justify-center flex h-full">

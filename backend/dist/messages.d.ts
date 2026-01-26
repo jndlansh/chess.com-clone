@@ -5,4 +5,6 @@ export declare const WAITING = "WAITING";
 export declare const SPECTATE = "SPECTATE";
 export declare const ERROR = "ERROR";
 export declare const TIME_UPDATE = "TIME_UPDATE";
+export declare const GAME_STATE = "GAME_STATE";
+export declare const ABANDON_GAME = "ABANDON_GAME";
 //# sourceMappingURL=messages.d.ts.map

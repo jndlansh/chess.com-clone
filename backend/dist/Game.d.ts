@@ -8,9 +8,9 @@ export declare class Game {
     player2Id: string;
     board: Chess;
     spectators: Set<WebSocket>;
+    whiteTime: number;
+    blackTime: number;
     private moveCount;
-    private whiteTime;
-    private blackTime;
     private lastMoveTime;
     private timerInterval?;
     constructor(player1: WebSocket, player2: WebSocket, player1Id: string, player2Id: string, timeControl?: number, gameId?: string);

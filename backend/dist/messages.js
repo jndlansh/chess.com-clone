@@ -5,4 +5,6 @@ export const WAITING = 'WAITING';
 export const SPECTATE = 'SPECTATE';
 export const ERROR = 'ERROR';
 export const TIME_UPDATE = 'TIME_UPDATE';
+export const GAME_STATE = 'GAME_STATE';
+export const ABANDON_GAME = 'ABANDON_GAME';
 //# sourceMappingURL=messages.js.map

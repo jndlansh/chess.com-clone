@@ -1,9 +1,12 @@
 import { useNavigate } from 'react-router-dom';
+import { useContext } from 'react';
 import { Button } from "../components/Button";
 import { Navbar } from "../components/Navbar";
+import { AuthContext } from '../contexts/AuthContext';
 
 const Landing = () => {
     const navigate = useNavigate();
+    const { user } = useContext(AuthContext);
     return <>
         {/* <Navbar /> */}
         <div className="flex justify-center pt-20">
@@ -20,7 +23,7 @@ const Landing = () => {
 
                         <div className='mt-8 flex justify-center'>
                             <Button onClick={() => {
-                                navigate('/game');
+                                navigate(user ? '/game' : '/login');
                             }}>
                                 Get Started
                             </Button>

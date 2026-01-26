@@ -13,9 +13,9 @@ export class Game {
     public player2Id: string;
     public board: Chess;
     public spectators: Set<WebSocket> = new Set();
+    public whiteTime: number; // in milliseconds
+    public blackTime: number;
     private moveCount = 0;
-    private whiteTime: number; // in milliseconds
-    private blackTime: number;
     private lastMoveTime: Date;
     private timerInterval?: NodeJS.Timeout;
 
@@ -140,12 +140,17 @@ export class Game {
                     pgn: this.board.pgn(),
                     fen: this.board.fen(),
                     status: 'IN_PROGRESS',
-                    moves: []
+                    moves: [],
+                    whiteTimeLeft: this.whiteTime,
+                    blackTimeLeft: this.blackTime,
+                    timeControl: this.whiteTime
                 },
                 update: {
                     pgn: this.board.pgn(),
                     fen: this.board.fen(),
-                    moves: this.board.history({ verbose: true }) as any[]
+                    moves: this.board.history({ verbose: true }) as any[],
+                    whiteTimeLeft: this.whiteTime,
+                    blackTimeLeft: this.blackTime
                 }
             });
         } catch (error) {
@@ -202,9 +207,9 @@ export class Game {
                 payload: move
             });
 
-            // Send to the other player
-            const otherPlayer = socket === this.player1 ? this.player2 : this.player1;
-            otherPlayer.send(moveMessage);
+            // Send to BOTH players (not just the other player)
+            this.player1.send(moveMessage);
+            this.player2.send(moveMessage);
 
             // Send to all spectators
             this.spectators.forEach(spectator => {
