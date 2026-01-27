@@ -2,6 +2,7 @@ import { useState, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AuthContext } from '../contexts/AuthContext';
 import { Button } from '../components/Button';
+import { Navbar } from '../components/Navbar';
 
 const Signup = () => {
     const [email, setEmail] = useState('');
@@ -41,7 +42,9 @@ const Signup = () => {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-900">
+        <>
+            <Navbar />
+            <div className="ml-[180px] min-h-screen flex items-center justify-center bg-gray-900">
             <div className="bg-gray-800 p-8 rounded-lg shadow-lg w-full max-w-md">
                 <h1 className="text-3xl font-bold text-white mb-6 text-center">Sign Up</h1>
                 
@@ -126,6 +129,7 @@ const Signup = () => {
                 </p>
             </div>
         </div>
+        </>
     );
 };
 

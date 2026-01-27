@@ -3,6 +3,7 @@ export declare class GameManager {
     private games;
     private pendingUser;
     private users;
+    private reconnecting;
     constructor();
     addUser(socket: WebSocket, userId: string): Promise<void>;
     private reconnectToActiveGame;

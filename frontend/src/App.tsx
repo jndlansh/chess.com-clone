@@ -10,7 +10,7 @@ function App() {
 
   return (
     <>
-      <section className='min-h-screen bg-[#2C2B29]'>
+      <section className='m-0 p-0 min-h-screen w-full bg-[#2C2B29]'>
         <BrowserRouter>
           <Navbar />
           <Routes>

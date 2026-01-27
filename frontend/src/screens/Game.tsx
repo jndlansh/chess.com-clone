@@ -1,5 +1,6 @@
 import { Button } from '../components/Button'
 import { Chessboard } from '../components/Chessboard'
+import { Navbar } from '../components/Navbar'
 import { useSocket } from '../hooks/useSocket'
 import { useEffect, useState } from 'react'
 import { Chess } from 'chess.js'
@@ -28,8 +29,9 @@ const Game = () => {
     useEffect(() => {
         if(!socket) return;
 
-        socket.onmessage = (event) => {
+        const handleMessage = (event: MessageEvent) => {
             const message = JSON.parse(event.data);
+            console.log('Received message:', message.type, message.payload);
 
             switch (message.type) {
                 case INIT_GAME:
@@ -43,6 +45,7 @@ const Game = () => {
                     setWhiteTime(600000);
                     setBlackTime(600000);
                     setCurrentTurn('white');
+                    console.log('New game started as:', message.payload.color);
                     break;
                 case "GAME_STATE":
                     //restore game from saved state
@@ -57,7 +60,7 @@ const Game = () => {
                     setBlackTime(message.payload.blackTime || 600000);
                     setStarted(true);
                     setCanAbandon(message.payload.canAbandon || false);
-                    console.log("Game Restored:", message.payload);
+                    console.log("Game Restored - Color:", message.payload.color, "FEN:", message.payload.fen);
                     break;
                 case MOVE:
                     const move = message.payload;
@@ -90,46 +93,55 @@ const Game = () => {
                     console.log("Game abandoned");
                     break;
             }
-        }
-    }, [socket])
+        };
+
+        socket.addEventListener('message', handleMessage);
+
+        return () => {
+            socket.removeEventListener('message', handleMessage);
+        };
+    }, [socket]);
 
     if(!socket) return <div>Connecting to server...</div>
 
-    return <div className="justify-center flex">
-        <div className="pt-8 max-w-4xl w-full">
-            <div className="grid grid-cols-6 gap-4 w-full">
-                <div className="col-span-4 w-full">
-                    <Chessboard chess={chess} board={board} socket={socket} setBoard={setBoard} setChess={setChess} playerColor={playerColor} />
-                </div>
-
-                <div className="col-span-2 bg-slate-700 w-full">
-                    <ChessTimer 
-                        whiteTime={whiteTime}
-                        blackTime={blackTime}
-                        playerColor={playerColor}
-                        currentTurn={currentTurn}
-                    />
-                    <div className='pt-8'>
-                        {!started && <Button onClick={() => {
-                            socket.send(JSON.stringify({
-                                type: INIT_GAME,
-                            }))
-                        }}>
-                            Play
-                        </Button>}
-                        {canAbandon && <Button onClick={() => {
-                            socket.send(JSON.stringify({
-                                type: ABANDON_GAME,
-                            }))
-                        }}>
-                            Abandon Game
-                        </Button>}
+    return <>
+        <Navbar />
+        <div className="ml-[180px] justify-center flex">
+            <div className="pt-8 max-w-4xl w-full">
+                <div className="grid grid-cols-6 gap-4 w-full">
+                    <div className="col-span-4 w-full">
+                        <Chessboard chess={chess} board={board} socket={socket} setBoard={setBoard} setChess={setChess} playerColor={playerColor} />
                     </div>
-                    {started && <MoveHistory moves={moveHistory} />}
+
+                    <div className="col-span-2 bg-slate-700 w-full">
+                        <ChessTimer 
+                            whiteTime={whiteTime}
+                            blackTime={blackTime}
+                            playerColor={playerColor}
+                            currentTurn={currentTurn}
+                        />
+                        <div className='pt-8'>
+                            {!started && <Button onClick={() => {
+                                socket.send(JSON.stringify({
+                                    type: INIT_GAME,
+                                }))
+                            }}>
+                                Play
+                            </Button>}
+                            {canAbandon && <Button onClick={() => {
+                                socket.send(JSON.stringify({
+                                    type: ABANDON_GAME,
+                                }))
+                            }}>
+                                Abandon Game
+                            </Button>}
+                        </div>
+                        {started && <MoveHistory moves={moveHistory} />}
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
+    </>
 }
 
 export default Game

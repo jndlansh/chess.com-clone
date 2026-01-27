@@ -14,24 +14,27 @@ export const useSocket = () => {
             return;
         }
 
+        console.log('[Socket] Connecting to WebSocket...');
+        
         // Connect with token in query params
         const ws = new WebSocket(`${WS_URL}?token=${token}`);
         
         ws.onopen = () => {
-            console.log('WebSocket connected');
+            console.log('[Socket] WebSocket connected successfully');
             setSocket(ws);
         }
 
         ws.onclose = () => {
-            console.log('WebSocket disconnected');
+            console.log('[Socket] WebSocket disconnected');
             setSocket(null);
         }
 
         ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
+            console.error('[Socket] WebSocket error:', error);
         }
 
         return () => {
+            console.log('[Socket] Cleaning up WebSocket connection');
             ws.close();
         }
     }, [token])
