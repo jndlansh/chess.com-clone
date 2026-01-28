@@ -25,7 +25,7 @@ export const AuthContext = createContext<AuthContextType>({
   logout: () => {}
 });
 
-const API_URL = 'http://localhost:8080';
+const API_URL = 'https://chess-com-backend.onrender.com';
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
