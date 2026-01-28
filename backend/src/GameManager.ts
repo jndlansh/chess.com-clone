@@ -214,12 +214,27 @@ export class GameManager {
                 });
 
                 if (dbGame) {
+                    // Determine who abandoned
+                    const abandoningUserId = socket.userId;
+                    const playerColor = dbGame.whitePlayerId === abandoningUserId ? 'White' : 'Black';
+                    
+                    // Update game status
                     await prisma.game.update({
                         where: { id: dbGame.id },
                         data: { 
                             status: 'ABANDONED',
                             endTime: new Date(),
-                            result: 'abandoned'
+                            result: `abandoned_by_${playerColor.toLowerCase()}`
+                        }
+                    });
+
+                    // Deduct 20 rating points from the abandoning player
+                    await prisma.user.update({
+                        where: { id: abandoningUserId },
+                        data: {
+                            rating: {
+                                decrement: 20
+                            }
                         }
                     });
 
@@ -230,20 +245,27 @@ export class GameManager {
                             this.games.splice(index, 1);
                         }
                         
-                        // Notify both players
-                        memoryGame.player1.send(JSON.stringify({
+                        // Notify both players with specific message
+                        const abandonMessage = JSON.stringify({
                             type: 'GAME_ABANDONED',
-                            payload: { message: 'Game abandoned' }
-                        }));
-                        memoryGame.player2.send(JSON.stringify({
-                            type: 'GAME_ABANDONED',
-                            payload: { message: 'Game abandoned' }
-                        }));
+                            payload: { 
+                                message: `Game abandoned by ${playerColor} player`,
+                                abandonedBy: playerColor,
+                                ratingChange: abandoningUserId === socket.userId ? -20 : 0
+                            }
+                        });
+                        
+                        memoryGame.player1.send(abandonMessage);
+                        memoryGame.player2.send(abandonMessage);
                     } else {
                         // Only notify the requesting player
                         socket.send(JSON.stringify({
                             type: 'GAME_ABANDONED',
-                            payload: { message: 'Game abandoned successfully' }
+                            payload: { 
+                                message: `Game abandoned by ${playerColor} player`,
+                                abandonedBy: playerColor,
+                                ratingChange: -20
+                            }
                         }));
                     }
                 }

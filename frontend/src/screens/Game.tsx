@@ -81,6 +81,10 @@ const Game = () => {
                     console.log("Game Over");
                     break;
                 case 'GAME_ABANDONED':
+                    // Show alert with who abandoned
+                    const abandonMessage = message.payload.message || 'Game has been abandoned';
+                    alert(abandonMessage);
+                    
                     const freshGame = new Chess();
                     setStarted(false);
                     setCanAbandon(false);
