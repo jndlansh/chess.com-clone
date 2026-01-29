@@ -121,7 +121,6 @@ const Game = () => {
                         <ChessTimer 
                             whiteTime={whiteTime}
                             blackTime={blackTime}
-                            playerColor={playerColor}
                             currentTurn={currentTurn}
                         />
                         <div className='pt-8'>
