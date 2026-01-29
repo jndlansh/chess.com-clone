@@ -5,7 +5,7 @@ interface ChessTimerProps {
     currentTurn: 'white' | 'black';
 }
 
-export const ChessTimer = ({ whiteTime, blackTime, playerColor, currentTurn }: ChessTimerProps) => {
+export const ChessTimer = ({ whiteTime, blackTime, currentTurn }: ChessTimerProps) => {
     const formatTime = (ms: number) => {
         const totalSeconds = Math.floor(ms / 1000);
         const minutes = Math.floor(totalSeconds / 60);

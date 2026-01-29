@@ -114,7 +114,7 @@ const Game = () => {
             <div className="pt-8 max-w-4xl w-full">
                 <div className="grid grid-cols-6 gap-4 w-full">
                     <div className="col-span-4 w-full">
-                        <Chessboard chess={chess} board={board} socket={socket} setBoard={setBoard} setChess={setChess} playerColor={playerColor} />
+                        <Chessboard chess={chess} board={board} socket={socket} playerColor={playerColor} />
                     </div>
 
                     <div className="col-span-2 bg-slate-700 w-full">

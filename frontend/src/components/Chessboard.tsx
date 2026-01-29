@@ -1,15 +1,9 @@
 import { Chess, type Color, type PieceSymbol, type Square } from 'chess.js';
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { MOVE } from '../screens/Game';
 
-export const Chessboard = ({ chess, board, socket, setBoard, setChess, playerColor }: {
+export const Chessboard = ({ chess, board, socket, playerColor }: {
   chess: Chess;
-  setBoard: React.Dispatch<React.SetStateAction<({
-    square: Square;
-    type: PieceSymbol;
-    color: Color
-  } | null)[][]>>;
-  setChess: React.Dispatch<React.SetStateAction<Chess>>;
   board: ({
     square: Square;
     type: PieceSymbol;
