@@ -1,7 +1,6 @@
 interface ChessTimerProps {
     whiteTime: number;
     blackTime: number;
-    playerColor: 'white' | 'black' | null;
     currentTurn: 'white' | 'black';
 }
 
