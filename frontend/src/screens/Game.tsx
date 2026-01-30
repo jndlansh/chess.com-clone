@@ -3,8 +3,8 @@ import { Chessboard } from '../components/Chessboard'
 import { Navbar } from '../components/Navbar'
 import { useSocket } from '../hooks/useSocket'
 import { useEffect, useState, useRef, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Chess } from 'chess.js'
-import { ChessTimer } from '../components/ChessTimer'
 import { MoveHistory } from '../components/MoveHistory'
 
 // TODO: Move together, there's code repetition here
@@ -16,6 +16,7 @@ export const ABANDON_GAME = "ABANDON_GAME";
 const Game = () => {
 
     const socket = useSocket();
+    const navigate = useNavigate();
     const [chess, setChess] = useState(new Chess());
     const [board, setBoard] = useState(chess.board());
     const [started,setStarted] = useState(false);
@@ -80,8 +81,35 @@ const Game = () => {
                 setBlackTime(message.payload.blackTime);
                 break;
             case GAME_OVER:
-                console.log("Game Over");
+                const winner = message.payload.winner;
+                const reason = message.payload.reason;
+                
+                // Determine the result message
+                let resultMessage = '';
+                if (winner === 'draw') {
+                    resultMessage = `Game ended in a draw!`;
+                } else {
+                    const winnerName = winner.charAt(0).toUpperCase() + winner.slice(1);
+                    if (reason === 'timeout') {
+                        resultMessage = `${winnerName} wins by timeout!`;
+                    } else if (reason === 'checkmate') {
+                        resultMessage = `${winnerName} wins by checkmate!`;
+                    } else {
+                        resultMessage = `${winnerName} wins!`;
+                    }
+                }
+                
+                alert(resultMessage + '\n\nRatings have been updated.');
+                console.log("Game Over:", resultMessage);
+                
+                // Reset game state
                 setCanAbandon(false);
+                setStarted(false);
+                
+                // Navigate to landing page
+                setTimeout(() => {
+                    navigate('/');
+                }, 500);
                 break;
             case 'GAME_ABANDONED':
                 // Show alert with who abandoned
@@ -98,9 +126,14 @@ const Game = () => {
                 setBlackTime(600000);
                 setCurrentTurn('white');
                 console.log("Game abandoned");
+                
+                // Navigate to landing page
+                setTimeout(() => {
+                    navigate('/');
+                }, 500);
                 break;
         }
-    }, []);
+    }, [navigate]);
 
     // Extended WebSocket type with message queue
     interface QueuedWebSocket extends WebSocket {
@@ -147,22 +180,49 @@ const Game = () => {
 
     if(!socket) return <div>Connecting to server...</div>
 
+    const formatTime = (ms: number) => {
+        const totalSeconds = Math.floor(ms / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    };
+
     return <>
         <Navbar />
         <div className="ml-[180px] justify-center flex">
-            <div className="pt-8 max-w-4xl w-full">
+            <div className="pt-8 max-w-screen-lg w-full px-4">
                 <div className="grid grid-cols-6 gap-4 w-full">
-                    <div className="col-span-4 w-full">
+                    {/* Left Column - Chessboard with Timers */}
+                    <div className="col-span-4 flex flex-col gap-4">
+                        {/* Black Timer - Above Board */}
+                        {started && (
+                            <div className={`p-4 rounded ${
+                                currentTurn === 'black' ? 'bg-yellow-500' : 'bg-gray-600'
+                            }`}>
+                                <div className="text-white text-xl font-bold">
+                                    Black: {formatTime(blackTime)}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Chessboard */}
                         <Chessboard chess={chess} board={board} socket={socket} playerColor={playerColor} />
+
+                        {/* White Timer - Below Board */}
+                        {started && (
+                            <div className={`p-4 rounded ${
+                                currentTurn === 'white' ? 'bg-yellow-500' : 'bg-gray-600'
+                            }`}>
+                                <div className="text-white text-xl font-bold">
+                                    White: {formatTime(whiteTime)}
+                                </div>
+                            </div>
+                        )}
                     </div>
 
-                    <div className="col-span-2 bg-slate-700 w-full">
-                        <ChessTimer 
-                            whiteTime={whiteTime}
-                            blackTime={blackTime}
-                            currentTurn={currentTurn}
-                        />
-                        <div className='pt-8'>
+                    {/* Right Column - Controls and Move History */}
+                    <div className="col-span-2 bg-slate-700 w-full flex flex-col">
+                        <div className='p-8'>
                             {!started && <Button onClick={() => {
                                 socket.send(JSON.stringify({
                                     type: INIT_GAME,
