@@ -42,7 +42,7 @@ export class GameManager {
             if (game) {
                 console.log(`[Reconnect] Found game in memory - GameID: ${game.gameId}`);
             }
-            //if not in memory, check database
+            //if not in memory, check database and restore the game
             if (!game) {
                 console.log('[Reconnect] No game in memory, checking database...');
                 const dbGame = await prisma.game.findFirst({
@@ -73,29 +73,34 @@ export class GameManager {
                         });
                         return;
                     }
-                    //Send game state and allow user to abandon or wait for opponent
-                    const playerColor = dbGame.whitePlayerId === userId ? 'white' : 'black';
-                    console.log(`[Reconnect] Sending GAME_STATE - Color: ${playerColor}`);
-                    socket.send(JSON.stringify({
-                        type: 'GAME_STATE',
-                        payload: {
-                            gameId: dbGame.id,
-                            fen: dbGame.fen,
-                            pgn: dbGame.pgn,
-                            moves: dbGame.moves,
-                            color: playerColor,
-                            whiteTime: dbGame.whiteTimeLeft ?? dbGame.timeControl ?? 600000,
-                            blackTime: dbGame.blackTimeLeft ?? dbGame.timeControl ?? 600000,
-                            canAbandon: true
-                        }
-                    }));
-                    return;
+                    // Calculate move count from FEN (count moves made so far)
+                    // FEN format: position turn castling en-passant halfmove fullmove
+                    // We use the board state to determine whose turn it is
+                    const fenParts = dbGame.fen.split(' ');
+                    const currentTurn = fenParts[1]; // 'w' or 'b'
+                    const fullMoveNumber = parseInt(fenParts[5] || '1');
+                    // moveCount: white=0, after white moves black=1, etc.
+                    const moveCount = (fullMoveNumber - 1) * 2 + (currentTurn === 'b' ? 1 : 0);
+                    // Restore the game in memory
+                    game = Game.restore({
+                        gameId: dbGame.id,
+                        player1Id: dbGame.whitePlayerId,
+                        player2Id: dbGame.blackPlayerId,
+                        fen: dbGame.fen,
+                        whiteTime: dbGame.whiteTimeLeft ?? dbGame.timeControl ?? 600000,
+                        blackTime: dbGame.blackTimeLeft ?? dbGame.timeControl ?? 600000,
+                        moveCount: moveCount
+                    });
+                    // Add the restored game to the games array
+                    this.games.push(game);
+                    console.log(`[Reconnect] Game restored and added to memory`);
                 }
                 else {
                     console.log('[Reconnect] No active game found in database');
+                    return;
                 }
             }
-            //If game exixts in memory, reconnect the socket
+            // Now connect the socket to the game (game exists in memory at this point)
             if (game) {
                 const playerColor = game.player1Id === userId ? 'white' : 'black';
                 if (game.player1Id === userId) {
@@ -106,7 +111,7 @@ export class GameManager {
                     game.player2 = socket;
                     console.log(`[Reconnect] Updated player2 socket`);
                 }
-                console.log(`[Reconnect] Sending in-memory GAME_STATE - Color: ${playerColor}`);
+                console.log(`[Reconnect] Sending GAME_STATE - Color: ${playerColor}`);
                 //Send current game state to the reconnected user
                 socket.send(JSON.stringify({
                     type: 'GAME_STATE',
@@ -178,12 +183,25 @@ export class GameManager {
                     }
                 });
                 if (dbGame) {
+                    // Determine who abandoned
+                    const abandoningUserId = socket.userId;
+                    const playerColor = dbGame.whitePlayerId === abandoningUserId ? 'White' : 'Black';
+                    // Update game status
                     await prisma.game.update({
                         where: { id: dbGame.id },
                         data: {
                             status: 'ABANDONED',
                             endTime: new Date(),
-                            result: 'abandoned'
+                            result: `abandoned_by_${playerColor.toLowerCase()}`
+                        }
+                    });
+                    // Deduct 20 rating points from the abandoning player
+                    await prisma.user.update({
+                        where: { id: abandoningUserId },
+                        data: {
+                            rating: {
+                                decrement: 20
+                            }
                         }
                     });
                     // Remove from memory if exists
@@ -192,21 +210,31 @@ export class GameManager {
                         if (index > -1) {
                             this.games.splice(index, 1);
                         }
-                        // Notify both players
-                        memoryGame.player1.send(JSON.stringify({
+                        // Notify both players with specific message
+                        const abandonMessage = JSON.stringify({
                             type: 'GAME_ABANDONED',
-                            payload: { message: 'Game abandoned' }
-                        }));
-                        memoryGame.player2.send(JSON.stringify({
-                            type: 'GAME_ABANDONED',
-                            payload: { message: 'Game abandoned' }
-                        }));
+                            payload: {
+                                message: `Game abandoned by ${playerColor} player`,
+                                abandonedBy: playerColor,
+                                ratingChange: abandoningUserId === socket.userId ? -20 : 0
+                            }
+                        });
+                        if (memoryGame.player1 && memoryGame.player1.readyState === 1) {
+                            memoryGame.player1.send(abandonMessage);
+                        }
+                        if (memoryGame.player2 && memoryGame.player2.readyState === 1) {
+                            memoryGame.player2.send(abandonMessage);
+                        }
                     }
                     else {
                         // Only notify the requesting player
                         socket.send(JSON.stringify({
                             type: 'GAME_ABANDONED',
-                            payload: { message: 'Game abandoned successfully' }
+                            payload: {
+                                message: `Game abandoned by ${playerColor} player`,
+                                abandonedBy: playerColor,
+                                ratingChange: -20
+                            }
                         }));
                     }
                 }

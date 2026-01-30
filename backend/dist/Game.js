@@ -16,6 +16,7 @@ export class Game {
     moveCount = 0;
     lastMoveTime;
     timerInterval;
+    isRestored = false; // Track if this is a restored game
     constructor(player1, player2, player1Id, player2Id, timeControl = 600000, gameId) {
         this.player1 = player1;
         this.player2 = player2;
@@ -30,20 +31,45 @@ export class Game {
         // Save game to database
         this.saveGame();
         // Notify players
-        this.player1.send(JSON.stringify({
-            type: INIT_GAME,
-            payload: {
-                color: 'white',
-                gameId: this.gameId
-            }
-        }));
-        this.player2.send(JSON.stringify({
-            type: INIT_GAME,
-            payload: {
-                color: 'black',
-                gameId: this.gameId
-            }
-        }));
+        if (this.player1) {
+            this.player1.send(JSON.stringify({
+                type: INIT_GAME,
+                payload: {
+                    color: 'white',
+                    gameId: this.gameId
+                }
+            }));
+        }
+        if (this.player2) {
+            this.player2.send(JSON.stringify({
+                type: INIT_GAME,
+                payload: {
+                    color: 'black',
+                    gameId: this.gameId
+                }
+            }));
+        }
+    }
+    // Static method to restore a game from database state
+    static restore(options) {
+        const game = Object.create(Game.prototype);
+        game.gameId = options.gameId;
+        game.player1Id = options.player1Id;
+        game.player2Id = options.player2Id;
+        game.player1 = null;
+        game.player2 = null;
+        game.board = new Chess(options.fen);
+        game.spectators = new Set();
+        game.whiteTime = options.whiteTime;
+        game.blackTime = options.blackTime;
+        game.moveCount = options.moveCount;
+        game.lastMoveTime = new Date();
+        game.timerInterval = undefined;
+        game.isRestored = true;
+        // Start the timer for restored games
+        game.startTimer();
+        console.log(`[Game.restore] Restored game ${options.gameId} with moveCount=${options.moveCount}, FEN=${options.fen}`);
+        return game;
     }
     generateGameId() {
         return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -78,9 +104,16 @@ export class Game {
                 blackTime: Math.max(0, this.blackTime)
             }
         });
-        this.player1.send(timeUpdate);
-        this.player2.send(timeUpdate);
-        this.spectators.forEach(s => s.send(timeUpdate));
+        if (this.player1 && this.player1.readyState === 1) {
+            this.player1.send(timeUpdate);
+        }
+        if (this.player2 && this.player2.readyState === 1) {
+            this.player2.send(timeUpdate);
+        }
+        this.spectators.forEach(s => {
+            if (s.readyState === 1)
+                s.send(timeUpdate);
+        });
     }
     async timeOut(winner) {
         if (this.timerInterval) {
@@ -103,9 +136,16 @@ export class Game {
                 reason: 'timeout'
             }
         });
-        this.player1.send(message);
-        this.player2.send(message);
-        this.spectators.forEach(s => s.send(message));
+        if (this.player1 && this.player1.readyState === 1) {
+            this.player1.send(message);
+        }
+        if (this.player2 && this.player2.readyState === 1) {
+            this.player2.send(message);
+        }
+        this.spectators.forEach(s => {
+            if (s.readyState === 1)
+                s.send(message);
+        });
     }
     async saveGame() {
         try {
@@ -170,6 +210,7 @@ export class Game {
         try {
             // Make the move
             this.board.move(move);
+            this.moveCount++; // Increment moveCount right after successful move
             this.lastMoveTime = new Date(); // Reset timer for next player
             // Save to database
             await this.saveGame();
@@ -179,18 +220,23 @@ export class Game {
                 payload: move
             });
             // Send to BOTH players (not just the other player)
-            this.player1.send(moveMessage);
-            this.player2.send(moveMessage);
+            if (this.player1 && this.player1.readyState === 1) {
+                this.player1.send(moveMessage);
+            }
+            if (this.player2 && this.player2.readyState === 1) {
+                this.player2.send(moveMessage);
+            }
             // Send to all spectators
             this.spectators.forEach(spectator => {
-                spectator.send(moveMessage);
+                if (spectator.readyState === 1) {
+                    spectator.send(moveMessage);
+                }
             });
             // Check if game is over
             if (this.board.isGameOver()) {
                 await this.endGame();
                 return;
             }
-            this.moveCount++;
         }
         catch (error) {
             console.error('Move error:', error);
@@ -238,10 +284,16 @@ export class Game {
                 reason: this.board.isCheckmate() ? 'checkmate' : 'draw'
             }
         });
-        this.player1.send(gameOverMessage);
-        this.player2.send(gameOverMessage);
+        if (this.player1 && this.player1.readyState === 1) {
+            this.player1.send(gameOverMessage);
+        }
+        if (this.player2 && this.player2.readyState === 1) {
+            this.player2.send(gameOverMessage);
+        }
         this.spectators.forEach(spectator => {
-            spectator.send(gameOverMessage);
+            if (spectator.readyState === 1) {
+                spectator.send(gameOverMessage);
+            }
         });
     }
     async updateRatings(result) {

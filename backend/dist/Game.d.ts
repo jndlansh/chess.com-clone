@@ -1,9 +1,18 @@
 import { WebSocket } from "ws";
 import { Chess } from "chess.js";
+interface RestoreGameOptions {
+    gameId: string;
+    player1Id: string;
+    player2Id: string;
+    fen: string;
+    whiteTime: number;
+    blackTime: number;
+    moveCount: number;
+}
 export declare class Game {
     gameId: string;
-    player1: WebSocket;
-    player2: WebSocket;
+    player1: WebSocket | null;
+    player2: WebSocket | null;
     player1Id: string;
     player2Id: string;
     board: Chess;
@@ -13,7 +22,9 @@ export declare class Game {
     private moveCount;
     private lastMoveTime;
     private timerInterval?;
-    constructor(player1: WebSocket, player2: WebSocket, player1Id: string, player2Id: string, timeControl?: number, gameId?: string);
+    private isRestored;
+    constructor(player1: WebSocket | null, player2: WebSocket | null, player1Id: string, player2Id: string, timeControl?: number, gameId?: string);
+    static restore(options: RestoreGameOptions): Game;
     private generateGameId;
     private startTimer;
     private broadcastTime;
@@ -28,4 +39,5 @@ export declare class Game {
     endGame(): Promise<void>;
     updateRatings(result: string): Promise<void>;
 }
+export {};
 //# sourceMappingURL=Game.d.ts.map

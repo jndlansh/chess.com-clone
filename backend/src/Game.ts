@@ -5,24 +5,36 @@ import { INIT_GAME, MOVE, GAME_OVER } from "./messages.js";
 
 const prisma = new PrismaClient();
 
+interface RestoreGameOptions {
+    gameId: string;
+    player1Id: string;
+    player2Id: string;
+    fen: string;
+    whiteTime: number;
+    blackTime: number;
+    moveCount: number;
+}
+
 export class Game {
     public gameId: string;
-    public player1: WebSocket;
-    public player2: WebSocket;
+    public player1: WebSocket | null;
+    public player2: WebSocket | null;
     public player1Id: string;
     public player2Id: string;
     public board: Chess;
     public spectators: Set<WebSocket> = new Set();
     public whiteTime: number; // in milliseconds
     public blackTime: number;
+    public status: 'IN_PROGRESS' | 'COMPLETED' | 'ABANDONED' = 'IN_PROGRESS'; // Track game status
     private moveCount = 0;
     private lastMoveTime: Date;
-    private timerInterval?: NodeJS.Timeout;
+    private timerInterval?: NodeJS.Timeout | undefined;
+    private isRestored: boolean = false; // Track if this is a restored game
 
 
     constructor(
-        player1: WebSocket,
-        player2: WebSocket,
+        player1: WebSocket | null,
+        player2: WebSocket | null,
         player1Id: string,
         player2Id: string,
         timeControl: number = 600000,
@@ -43,20 +55,51 @@ export class Game {
         this.saveGame();
 
         // Notify players
-        this.player1.send(JSON.stringify({
-            type: INIT_GAME,
-            payload: {
-                color: 'white',
-                gameId: this.gameId
-            }
-        }));
-        this.player2.send(JSON.stringify({
-            type: INIT_GAME,
-            payload: {
-                color: 'black',
-                gameId: this.gameId
-            }
-        }));
+        if (this.player1) {
+            this.player1.send(JSON.stringify({
+                type: INIT_GAME,
+                payload: {
+                    color: 'white',
+                    gameId: this.gameId
+                }
+            }));
+        }
+        if (this.player2) {
+            this.player2.send(JSON.stringify({
+                type: INIT_GAME,
+                payload: {
+                    color: 'black',
+                    gameId: this.gameId
+                }
+            }));
+        }
+    }
+
+    // Static method to restore a game from database state
+    static restore(options: RestoreGameOptions): Game {
+        const game = Object.create(Game.prototype) as Game;
+        
+        game.gameId = options.gameId;
+        game.player1Id = options.player1Id;
+        game.player2Id = options.player2Id;
+        game.player1 = null;
+        game.player2 = null;
+        game.board = new Chess(options.fen);
+        game.spectators = new Set();
+        game.whiteTime = options.whiteTime;
+        game.blackTime = options.blackTime;
+        game.status = 'IN_PROGRESS';
+        game.moveCount = options.moveCount;
+        game.lastMoveTime = new Date();
+        game.timerInterval = undefined;
+        game.isRestored = true;
+        
+        // Start the timer for restored games
+        game.startTimer();
+        
+        console.log(`[Game.restore] Restored game ${options.gameId} with moveCount=${options.moveCount}, FEN=${options.fen}`);
+        
+        return game;
     }
 
     private generateGameId(): string {
@@ -95,12 +138,21 @@ export class Game {
             }
         });
 
-        this.player1.send(timeUpdate);
-        this.player2.send(timeUpdate);
-        this.spectators.forEach(s => s.send(timeUpdate));
+        if (this.player1 && this.player1.readyState === 1) {
+            this.player1.send(timeUpdate);
+        }
+        if (this.player2 && this.player2.readyState === 1) {
+            this.player2.send(timeUpdate);
+        }
+        this.spectators.forEach(s => {
+            if (s.readyState === 1) s.send(timeUpdate);
+        });
     }
 
     private async timeOut(winner: string) {
+        // Mark as completed immediately
+        this.status = 'COMPLETED';
+
         if (this.timerInterval) {
             clearInterval(this.timerInterval);
         }
@@ -124,9 +176,15 @@ export class Game {
             }
         });
 
-        this.player1.send(message);
-        this.player2.send(message);
-        this.spectators.forEach(s => s.send(message));
+        if (this.player1 && this.player1.readyState === 1) {
+            this.player1.send(message);
+        }
+        if (this.player2 && this.player2.readyState === 1) {
+            this.player2.send(message);
+        }
+        this.spectators.forEach(s => {
+            if (s.readyState === 1) s.send(message);
+        });
     }
 
     async saveGame() {
@@ -195,8 +253,8 @@ export class Game {
         try {
             // Make the move
             this.board.move(move);
+            this.moveCount++; // Increment moveCount right after successful move
             this.lastMoveTime = new Date(); // Reset timer for next player
-
 
             // Save to database
             await this.saveGame();
@@ -208,12 +266,18 @@ export class Game {
             });
 
             // Send to BOTH players (not just the other player)
-            this.player1.send(moveMessage);
-            this.player2.send(moveMessage);
+            if (this.player1 && this.player1.readyState === 1) {
+                this.player1.send(moveMessage);
+            }
+            if (this.player2 && this.player2.readyState === 1) {
+                this.player2.send(moveMessage);
+            }
 
             // Send to all spectators
             this.spectators.forEach(spectator => {
-                spectator.send(moveMessage);
+                if (spectator.readyState === 1) {
+                    spectator.send(moveMessage);
+                }
             });
 
             // Check if game is over
@@ -221,8 +285,6 @@ export class Game {
                 await this.endGame();
                 return;
             }
-
-            this.moveCount++;
         } catch (error) {
             console.error('Move error:', error);
             socket.send(JSON.stringify({
@@ -234,6 +296,9 @@ export class Game {
 
     async endGame() {
         let result: string;
+
+        // Mark as completed immediately
+        this.status = 'COMPLETED';
 
         if (this.timerInterval) {
             clearInterval(this.timerInterval);
@@ -273,10 +338,16 @@ export class Game {
             }
         });
 
-        this.player1.send(gameOverMessage);
-        this.player2.send(gameOverMessage);
+        if (this.player1 && this.player1.readyState === 1) {
+            this.player1.send(gameOverMessage);
+        }
+        if (this.player2 && this.player2.readyState === 1) {
+            this.player2.send(gameOverMessage);
+        }
         this.spectators.forEach(spectator => {
-            spectator.send(gameOverMessage);
+            if (spectator.readyState === 1) {
+                spectator.send(gameOverMessage);
+            }
         });
     }
 

@@ -52,96 +52,107 @@ export class GameManager {
         try {
             console.log(`[Reconnect] User ${userId} attempting reconnection`);
             
-            //find active game in memory
+            // Clean up completed games from memory first
+            this.games = this.games.filter(g => g.status === 'IN_PROGRESS');
+            
+            //find active game in memory (only IN_PROGRESS games)
             let game = this.games.find(
-                g => (g.player1Id === userId || g.player2Id === userId) 
+                g => (g.player1Id === userId || g.player2Id === userId) && g.status === 'IN_PROGRESS'
             )
 
             if(game){
                 console.log(`[Reconnect] Found game in memory - GameID: ${game.gameId}`);
             }
 
-            //if not in memory, check database
+            //if not in memory, check database and restore the game
             if(!game){
-            console.log('[Reconnect] No game in memory, checking database...');
-            const dbGame = await prisma.game.findFirst({
-                where: {
-                    OR: [
-                        {whitePlayerId: userId},
-                        {blackPlayerId: userId}
-                    ],
-                    status : 'IN_PROGRESS'
-                },
-                orderBy: {
-                    startTime: 'desc'
-                }
-            });
+                console.log('[Reconnect] No game in memory, checking database...');
+                const dbGame = await prisma.game.findFirst({
+                    where: {
+                        OR: [
+                            {whitePlayerId: userId},
+                            {blackPlayerId: userId}
+                        ],
+                        status : 'IN_PROGRESS'
+                    },
+                    orderBy: {
+                        startTime: 'desc'
+                    }
+                });
 
-            if(dbGame){
-                console.log(`[Reconnect] Found game in DB - GameID: ${dbGame.id}, FEN: ${dbGame.fen}`);
-                
-                // Check if game is too old (more than 24 hours)
-                const gameAge = Date.now() - new Date(dbGame.startTime).getTime();
-                if (gameAge > 24 * 60 * 60 * 1000) {
-                    console.log('[Reconnect] Game too old, abandoning');
-                    // Automatically abandon old games
-                    await prisma.game.update({
-                        where: { id: dbGame.id },
-                        data: { 
-                            status: 'ABANDONED',
-                            endTime: new Date()
-                        }
+                if(dbGame){
+                    console.log(`[Reconnect] Found game in DB - GameID: ${dbGame.id}, FEN: ${dbGame.fen}`);
+                    
+                    // Check if game is too old (more than 24 hours)
+                    const gameAge = Date.now() - new Date(dbGame.startTime).getTime();
+                    if (gameAge > 24 * 60 * 60 * 1000) {
+                        console.log('[Reconnect] Game too old, abandoning');
+                        // Automatically abandon old games
+                        await prisma.game.update({
+                            where: { id: dbGame.id },
+                            data: { 
+                                status: 'ABANDONED',
+                                endTime: new Date()
+                            }
+                        });
+                        return;
+                    }
+
+                    // Calculate move count from FEN (count moves made so far)
+                    // FEN format: position turn castling en-passant halfmove fullmove
+                    // We use the board state to determine whose turn it is
+                    const fenParts = dbGame.fen.split(' ');
+                    const currentTurn = fenParts[1]; // 'w' or 'b'
+                    const fullMoveNumber = parseInt(fenParts[5] || '1');
+                    // moveCount: white=0, after white moves black=1, etc.
+                    const moveCount = (fullMoveNumber - 1) * 2 + (currentTurn === 'b' ? 1 : 0);
+
+                    // Restore the game in memory
+                    game = Game.restore({
+                        gameId: dbGame.id,
+                        player1Id: dbGame.whitePlayerId,
+                        player2Id: dbGame.blackPlayerId,
+                        fen: dbGame.fen,
+                        whiteTime: (dbGame as any).whiteTimeLeft ?? (dbGame as any).timeControl ?? 600000,
+                        blackTime: (dbGame as any).blackTimeLeft ?? (dbGame as any).timeControl ?? 600000,
+                        moveCount: moveCount
                     });
+
+                    // Add the restored game to the games array
+                    this.games.push(game);
+                    console.log(`[Reconnect] Game restored and added to memory`);
+                } else {
+                    console.log('[Reconnect] No active game found in database');
                     return;
                 }
-
-                //Send game state and allow user to abandon or wait for opponent
-                const playerColor = dbGame.whitePlayerId === userId ? 'white' : 'black';
+            }
+            
+            // Now connect the socket to the game (game exists in memory at this point)
+            if(game){
+                const playerColor = game.player1Id === userId ? 'white' : 'black';
+                if(game.player1Id === userId){
+                    game.player1 = socket;
+                    console.log(`[Reconnect] Updated player1 socket`);
+                } else if(game.player2Id === userId){
+                    game.player2 = socket;
+                    console.log(`[Reconnect] Updated player2 socket`);
+                }
                 console.log(`[Reconnect] Sending GAME_STATE - Color: ${playerColor}`);
+                //Send current game state to the reconnected user
                 socket.send(JSON.stringify({
                     type: 'GAME_STATE',
                     payload:{
-                        gameId: dbGame.id,
-                        fen: dbGame.fen,
-                        pgn: dbGame.pgn,
-                        moves: dbGame.moves,
+                        gameId: game.gameId,
+                        fen: game.board.fen(),
+                        pgn: game.board.pgn(),
+                        moves: game.board.history(),
                         color: playerColor,
-                        whiteTime: (dbGame as any).whiteTimeLeft ?? (dbGame as any).timeControl ?? 600000,
-                        blackTime: (dbGame as any).blackTimeLeft ?? (dbGame as any).timeControl ?? 600000,
+                        whiteTime: game.whiteTime,
+                        blackTime: game.blackTime,
                         canAbandon: true
                     }
                 }));
-                return;
-            } else {
-                console.log('[Reconnect] No active game found in database');
             }
-        }
-        //If game exixts in memory, reconnect the socket
-        if(game){
-            const playerColor = game.player1Id === userId ? 'white' : 'black';
-            if(game.player1Id === userId){
-                game.player1 = socket;
-                console.log(`[Reconnect] Updated player1 socket`);
-            }else if(game.player2Id === userId){
-                game.player2 = socket;
-                console.log(`[Reconnect] Updated player2 socket`);
-            }
-            console.log(`[Reconnect] Sending in-memory GAME_STATE - Color: ${playerColor}`);
-            //Send current game state to the reconnected user
-            socket.send(JSON.stringify({
-                type: 'GAME_STATE',
-                payload:{
-                    gameId: game.gameId,
-                    fen: game.board.fen(),
-                    pgn: game.board.pgn(),
-                    moves: game.board.history(),
-                    color: playerColor,
-                    whiteTime: game.whiteTime,
-                    blackTime: game.blackTime,
-                    canAbandon: true
-                }
-            }));
-        }
         } finally {
             this.reconnecting.delete(userId);
         }
@@ -255,8 +266,12 @@ export class GameManager {
                             }
                         });
                         
-                        memoryGame.player1.send(abandonMessage);
-                        memoryGame.player2.send(abandonMessage);
+                        if (memoryGame.player1 && memoryGame.player1.readyState === 1) {
+                            memoryGame.player1.send(abandonMessage);
+                        }
+                        if (memoryGame.player2 && memoryGame.player2.readyState === 1) {
+                            memoryGame.player2.send(abandonMessage);
+                        }
                     } else {
                         // Only notify the requesting player
                         socket.send(JSON.stringify({

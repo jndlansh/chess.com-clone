@@ -2,7 +2,7 @@ import { Button } from '../components/Button'
 import { Chessboard } from '../components/Chessboard'
 import { Navbar } from '../components/Navbar'
 import { useSocket } from '../hooks/useSocket'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { Chess } from 'chess.js'
 import { ChessTimer } from '../components/ChessTimer'
 import { MoveHistory } from '../components/MoveHistory'
@@ -25,86 +25,125 @@ const Game = () => {
     const [currentTurn, setCurrentTurn] = useState<'white' | 'black'>('white');
     const [moveHistory, setMoveHistory] = useState<string[]>([]);
     const [canAbandon, setCanAbandon] = useState(false);
+    
+    // Use a ref to track the current socket to avoid stale closures
+    const socketRef = useRef<WebSocket | null>(null);
+    const handlerAttachedRef = useRef(false);
+
+    // Handle incoming messages
+    const handleMessage = useCallback((event: MessageEvent) => {
+        const message = JSON.parse(event.data);
+        console.log('Received message:', message.type, message.payload);
+
+        switch (message.type) {
+            case INIT_GAME:
+                const newGame = new Chess();
+                setChess(newGame);
+                setBoard(newGame.board());
+                setPlayerColor(message.payload.color);
+                setStarted(true);
+                setMoveHistory([]);
+                setCanAbandon(false);
+                setWhiteTime(600000);
+                setBlackTime(600000);
+                setCurrentTurn('white');
+                console.log('New game started as:', message.payload.color);
+                break;
+            case "GAME_STATE":
+                //restore game from saved state
+                const restoredChess = new Chess();
+                restoredChess.load(message.payload.fen);
+                setChess(restoredChess);
+                setBoard(restoredChess.board());
+                setPlayerColor(message.payload.color);
+                setMoveHistory(restoredChess.history());
+                setCurrentTurn(restoredChess.turn() === 'w' ? 'white' : 'black');
+                setWhiteTime(message.payload.whiteTime || 600000);
+                setBlackTime(message.payload.blackTime || 600000);
+                setStarted(true);
+                setCanAbandon(message.payload.canAbandon || false);
+                console.log("Game Restored - Color:", message.payload.color, "FEN:", message.payload.fen);
+                break;
+            case MOVE:
+                const move = message.payload;
+                setChess(prevChess => {
+                    const updatedChess = new Chess(prevChess.fen());
+                    updatedChess.move(move);
+                    setBoard(updatedChess.board());
+                    setCurrentTurn(updatedChess.turn() === 'w' ? 'white' : 'black');
+                    setMoveHistory(updatedChess.history());
+                    return updatedChess;
+                });
+                break;
+            case 'TIME_UPDATE':
+                setWhiteTime(message.payload.whiteTime);
+                setBlackTime(message.payload.blackTime);
+                break;
+            case GAME_OVER:
+                console.log("Game Over");
+                setCanAbandon(false);
+                break;
+            case 'GAME_ABANDONED':
+                // Show alert with who abandoned
+                const abandonMessage = message.payload.message || 'Game has been abandoned';
+                alert(abandonMessage);
+                
+                const freshGame = new Chess();
+                setStarted(false);
+                setCanAbandon(false);
+                setChess(freshGame);
+                setBoard(freshGame.board());
+                setMoveHistory([]);
+                setWhiteTime(600000);
+                setBlackTime(600000);
+                setCurrentTurn('white');
+                console.log("Game abandoned");
+                break;
+        }
+    }, []);
+
+    // Extended WebSocket type with message queue
+    interface QueuedWebSocket extends WebSocket {
+        messageQueue: MessageEvent[];
+        flushQueue: () => void;
+    }
 
     useEffect(() => {
-        if(!socket) return;
+        if(!socket) {
+            handlerAttachedRef.current = false;
+            return;
+        }
+        
+        // Avoid attaching handler multiple times to the same socket
+        if (socketRef.current === socket && handlerAttachedRef.current) {
+            return;
+        }
 
-        const handleMessage = (event: MessageEvent) => {
-            const message = JSON.parse(event.data);
-            console.log('Received message:', message.type, message.payload);
-
-            switch (message.type) {
-                case INIT_GAME:
-                    const newGame = new Chess();
-                    setChess(newGame);
-                    setBoard(newGame.board());
-                    setPlayerColor(message.payload.color);
-                    setStarted(true);
-                    setMoveHistory([]);
-                    setCanAbandon(false);
-                    setWhiteTime(600000);
-                    setBlackTime(600000);
-                    setCurrentTurn('white');
-                    console.log('New game started as:', message.payload.color);
-                    break;
-                case "GAME_STATE":
-                    //restore game from saved state
-                    const restoredChess = new Chess();
-                    restoredChess.load(message.payload.fen);
-                    setChess(restoredChess);
-                    setBoard(restoredChess.board());
-                    setPlayerColor(message.payload.color);
-                    setMoveHistory(restoredChess.history());
-                    setCurrentTurn(restoredChess.turn() === 'w' ? 'white' : 'black');
-                    setWhiteTime(message.payload.whiteTime || 600000);
-                    setBlackTime(message.payload.blackTime || 600000);
-                    setStarted(true);
-                    setCanAbandon(message.payload.canAbandon || false);
-                    console.log("Game Restored - Color:", message.payload.color, "FEN:", message.payload.fen);
-                    break;
-                case MOVE:
-                    const move = message.payload;
-                    setChess(prevChess => {
-                        const updatedChess = new Chess(prevChess.fen());
-                        updatedChess.move(move);
-                        setBoard(updatedChess.board());
-                        setCurrentTurn(updatedChess.turn() === 'w' ? 'white' : 'black');
-                        setMoveHistory(updatedChess.history());
-                        return updatedChess;
-                    });
-                    break;
-                case 'TIME_UPDATE':
-                    setWhiteTime(message.payload.whiteTime);
-                    setBlackTime(message.payload.blackTime);
-                    break;
-                case GAME_OVER:
-                    console.log("Game Over");
-                    break;
-                case 'GAME_ABANDONED':
-                    // Show alert with who abandoned
-                    const abandonMessage = message.payload.message || 'Game has been abandoned';
-                    alert(abandonMessage);
-                    
-                    const freshGame = new Chess();
-                    setStarted(false);
-                    setCanAbandon(false);
-                    setChess(freshGame);
-                    setBoard(freshGame.board());
-                    setMoveHistory([]);
-                    setWhiteTime(600000);
-                    setBlackTime(600000);
-                    setCurrentTurn('white');
-                    console.log("Game abandoned");
-                    break;
-            }
-        };
-
+        socketRef.current = socket;
+        handlerAttachedRef.current = true;
+        
+        console.log('[Game] Attaching message handler to socket');
+        
+        // Process any queued messages first
+        const queuedSocket = socket as QueuedWebSocket;
+        if (queuedSocket.messageQueue && queuedSocket.messageQueue.length > 0) {
+            console.log(`[Game] Processing ${queuedSocket.messageQueue.length} queued messages`);
+            queuedSocket.messageQueue.forEach(event => handleMessage(event));
+            queuedSocket.messageQueue = [];
+        }
+        
+        // Stop queueing and attach the real handler
+        if (queuedSocket.flushQueue) {
+            queuedSocket.flushQueue();
+        }
         socket.addEventListener('message', handleMessage);
 
         return () => {
+            console.log('[Game] Removing message handler from socket');
             socket.removeEventListener('message', handleMessage);
+            handlerAttachedRef.current = false;
         };
-    }, [socket]);
+    }, [socket, handleMessage]);
 
     if(!socket) return <div>Connecting to server...</div>
 
