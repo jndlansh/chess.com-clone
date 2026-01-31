@@ -1,7 +1,7 @@
 import { useEffect, useState, useContext, useRef } from "react";
 import { AuthContext } from "../contexts/AuthContext";
 
-const WS_URL = "ws://localhost:8080";
+const WS_URL = "wss://chess-com-backend.onrender.com";
 
 // Extended WebSocket type with message queue
 export interface QueuedWebSocket extends WebSocket {
