@@ -1,17 +1,23 @@
 import { Button } from '../components/Button'
 import { Chessboard } from '../components/Chessboard'
 import { Navbar } from '../components/Navbar'
-import { useSocket } from '../hooks/useSocket'
+import { useSocket, type QueuedWebSocket } from '../hooks/useSocket'
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Chess } from 'chess.js'
 import { MoveHistory } from '../components/MoveHistory'
+import { PlayerTimer } from '../components/ChessTimer'
 
 // TODO: Move together, there's code repetition here
 export const INIT_GAME = "init_game";
 export const MOVE = "move";
 export const GAME_OVER = "game_over";
 export const ABANDON_GAME = "ABANDON_GAME";
+
+interface PlayerInfo {
+    name: string;
+    rating: number;
+}
 
 const Game = () => {
 
@@ -26,10 +32,18 @@ const Game = () => {
     const [currentTurn, setCurrentTurn] = useState<'white' | 'black'>('white');
     const [moveHistory, setMoveHistory] = useState<string[]>([]);
     const [canAbandon, setCanAbandon] = useState(false);
+    const [whitePlayer, setWhitePlayer] = useState<PlayerInfo>({ name: 'White', rating: 1200 });
+    const [blackPlayer, setBlackPlayer] = useState<PlayerInfo>({ name: 'Black', rating: 1200 });
     
     // Use a ref to track the current socket to avoid stale closures
     const socketRef = useRef<WebSocket | null>(null);
     const handlerAttachedRef = useRef(false);
+    const chessRef = useRef(chess);
+    
+    // Keep chessRef in sync with chess state
+    useEffect(() => {
+        chessRef.current = chess;
+    }, [chess]);
 
     // Handle incoming messages
     const handleMessage = useCallback((event: MessageEvent) => {
@@ -39,6 +53,7 @@ const Game = () => {
         switch (message.type) {
             case INIT_GAME:
                 const newGame = new Chess();
+                chessRef.current = newGame;
                 setChess(newGame);
                 setBoard(newGame.board());
                 setPlayerColor(message.payload.color);
@@ -48,33 +63,52 @@ const Game = () => {
                 setWhiteTime(600000);
                 setBlackTime(600000);
                 setCurrentTurn('white');
+                // Set player info from payload
+                if (message.payload.whitePlayer) {
+                    setWhitePlayer(message.payload.whitePlayer);
+                }
+                if (message.payload.blackPlayer) {
+                    setBlackPlayer(message.payload.blackPlayer);
+                }
                 console.log('New game started as:', message.payload.color);
                 break;
             case "GAME_STATE":
                 //restore game from saved state
                 const restoredChess = new Chess();
                 restoredChess.load(message.payload.fen);
+                chessRef.current = restoredChess;
                 setChess(restoredChess);
                 setBoard(restoredChess.board());
                 setPlayerColor(message.payload.color);
-                setMoveHistory(restoredChess.history());
+                // Use moves from payload (FEN doesn't preserve history)
+                setMoveHistory(message.payload.moves || []);
                 setCurrentTurn(restoredChess.turn() === 'w' ? 'white' : 'black');
                 setWhiteTime(message.payload.whiteTime || 600000);
                 setBlackTime(message.payload.blackTime || 600000);
                 setStarted(true);
                 setCanAbandon(message.payload.canAbandon || false);
+                // Set player info from payload
+                if (message.payload.whitePlayer) {
+                    setWhitePlayer(message.payload.whitePlayer);
+                }
+                if (message.payload.blackPlayer) {
+                    setBlackPlayer(message.payload.blackPlayer);
+                }
                 console.log("Game Restored - Color:", message.payload.color, "FEN:", message.payload.fen);
                 break;
             case MOVE:
                 const move = message.payload;
-                setChess(prevChess => {
-                    const updatedChess = new Chess(prevChess.fen());
-                    updatedChess.move(move);
+                // Use ref to get the current chess state (avoids stale closure)
+                const updatedChess = new Chess(chessRef.current.fen());
+                const madeMove = updatedChess.move(move);
+                
+                if (madeMove) {
+                    chessRef.current = updatedChess;
+                    setChess(updatedChess);
                     setBoard(updatedChess.board());
                     setCurrentTurn(updatedChess.turn() === 'w' ? 'white' : 'black');
-                    setMoveHistory(updatedChess.history());
-                    return updatedChess;
-                });
+                    setMoveHistory(prev => [...prev, madeMove.san]);
+                }
                 break;
             case 'TIME_UPDATE':
                 setWhiteTime(message.payload.whiteTime);
@@ -135,20 +169,24 @@ const Game = () => {
         }
     }, [navigate]);
 
-    // Extended WebSocket type with message queue
-    interface QueuedWebSocket extends WebSocket {
-        messageQueue: MessageEvent[];
-        flushQueue: () => void;
-    }
-
+    // Process queued messages - this runs whenever socket changes
     useEffect(() => {
         if(!socket) {
             handlerAttachedRef.current = false;
             return;
         }
         
+        const queuedSocket = socket as QueuedWebSocket;
+        
         // Avoid attaching handler multiple times to the same socket
         if (socketRef.current === socket && handlerAttachedRef.current) {
+            // Still check for any new queued messages
+            if (queuedSocket.messageQueue && queuedSocket.messageQueue.length > 0) {
+                console.log(`[Game] Processing ${queuedSocket.messageQueue.length} late queued messages`);
+                const queuedMessages = [...queuedSocket.messageQueue];
+                queuedSocket.messageQueue = [];
+                queuedMessages.forEach(event => handleMessage(event));
+            }
             return;
         }
 
@@ -157,35 +195,62 @@ const Game = () => {
         
         console.log('[Game] Attaching message handler to socket');
         
-        // Process any queued messages first
-        const queuedSocket = socket as QueuedWebSocket;
+        // Set the game handler first (BEFORE processing queue)
+        queuedSocket.gameHandler = handleMessage;
+        
+        // Stop queueing new messages (they'll go to gameHandler now)
+        queuedSocket.isQueueing = false;
+        
+        console.log('[Game] Handler attached, queue length:', queuedSocket.messageQueue?.length || 0);
+        
+        // Process any queued messages
         if (queuedSocket.messageQueue && queuedSocket.messageQueue.length > 0) {
             console.log(`[Game] Processing ${queuedSocket.messageQueue.length} queued messages`);
-            queuedSocket.messageQueue.forEach(event => handleMessage(event));
+            // Process each queued message
+            const queuedMessages = [...queuedSocket.messageQueue];
             queuedSocket.messageQueue = [];
+            queuedMessages.forEach(event => {
+                console.log('[Game] Processing queued:', JSON.parse(event.data).type);
+                handleMessage(event);
+            });
         }
-        
-        // Stop queueing and attach the real handler
-        if (queuedSocket.flushQueue) {
-            queuedSocket.flushQueue();
-        }
-        socket.addEventListener('message', handleMessage);
 
         return () => {
             console.log('[Game] Removing message handler from socket');
-            socket.removeEventListener('message', handleMessage);
+            queuedSocket.gameHandler = null;
             handlerAttachedRef.current = false;
         };
+    }, [socket, handleMessage]);
+    
+    // Additional effect to catch any messages that arrived during the render cycle
+    useEffect(() => {
+        if (!socket) return;
+        
+        const queuedSocket = socket as QueuedWebSocket;
+        
+        // Check for queued messages after a short delay to catch any race conditions
+        const timeoutId = setTimeout(() => {
+            if (queuedSocket.messageQueue && queuedSocket.messageQueue.length > 0) {
+                console.log(`[Game] Processing ${queuedSocket.messageQueue.length} delayed queued messages`);
+                const queuedMessages = [...queuedSocket.messageQueue];
+                queuedSocket.messageQueue = [];
+                queuedMessages.forEach(event => handleMessage(event));
+            }
+        }, 100);
+        
+        return () => clearTimeout(timeoutId);
     }, [socket, handleMessage]);
 
     if(!socket) return <div>Connecting to server...</div>
 
-    const formatTime = (ms: number) => {
-        const totalSeconds = Math.floor(ms / 1000);
-        const minutes = Math.floor(totalSeconds / 60);
-        const seconds = totalSeconds % 60;
-        return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-    };
+    // Determine which player's timer should be at top/bottom based on player's color
+    // The player's own timer should be at the bottom
+    const topPlayer = playerColor === 'white' ? blackPlayer : whitePlayer;
+    const bottomPlayer = playerColor === 'white' ? whitePlayer : blackPlayer;
+    const topTime = playerColor === 'white' ? blackTime : whiteTime;
+    const bottomTime = playerColor === 'white' ? whiteTime : blackTime;
+    const topColor: 'white' | 'black' = playerColor === 'white' ? 'black' : 'white';
+    const bottomColor: 'white' | 'black' = playerColor === 'white' ? 'white' : 'black';
 
     return <>
         <Navbar />
@@ -193,30 +258,30 @@ const Game = () => {
             <div className="pt-8 max-w-screen-lg w-full px-4">
                 <div className="grid grid-cols-6 gap-4 w-full">
                     {/* Left Column - Chessboard with Timers */}
-                    <div className="col-span-4 flex flex-col gap-4">
-                        {/* Black Timer - Above Board */}
+                    <div className="col-span-4 flex flex-col gap-2">
+                        {/* Opponent Timer - Above Board */}
                         {started && (
-                            <div className={`p-4 rounded ${
-                                currentTurn === 'black' ? 'bg-yellow-500' : 'bg-gray-600'
-                            }`}>
-                                <div className="text-white text-xl font-bold">
-                                    Black: {formatTime(blackTime)}
-                                </div>
-                            </div>
+                            <PlayerTimer
+                                time={topTime}
+                                isActive={currentTurn === topColor}
+                                playerName={topPlayer.name}
+                                rating={topPlayer.rating}
+                                color={topColor}
+                            />
                         )}
 
                         {/* Chessboard */}
                         <Chessboard chess={chess} board={board} socket={socket} playerColor={playerColor} />
 
-                        {/* White Timer - Below Board */}
+                        {/* Player Timer - Below Board */}
                         {started && (
-                            <div className={`p-4 rounded ${
-                                currentTurn === 'white' ? 'bg-yellow-500' : 'bg-gray-600'
-                            }`}>
-                                <div className="text-white text-xl font-bold">
-                                    White: {formatTime(whiteTime)}
-                                </div>
-                            </div>
+                            <PlayerTimer
+                                time={bottomTime}
+                                isActive={currentTurn === bottomColor}
+                                playerName={bottomPlayer.name}
+                                rating={bottomPlayer.rating}
+                                color={bottomColor}
+                            />
                         )}
                     </div>
 

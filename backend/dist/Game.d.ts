@@ -19,11 +19,13 @@ export declare class Game {
     spectators: Set<WebSocket>;
     whiteTime: number;
     blackTime: number;
+    status: 'IN_PROGRESS' | 'COMPLETED' | 'ABANDONED';
     private moveCount;
     private lastMoveTime;
     private timerInterval?;
     private isRestored;
     constructor(player1: WebSocket | null, player2: WebSocket | null, player1Id: string, player2Id: string, timeControl?: number, gameId?: string);
+    private sendInitMessages;
     static restore(options: RestoreGameOptions): Game;
     private generateGameId;
     private startTimer;

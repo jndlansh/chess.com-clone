@@ -130,16 +130,40 @@ export class GameManager {
             // Now connect the socket to the game (game exists in memory at this point)
             if(game){
                 const playerColor = game.player1Id === userId ? 'white' : 'black';
-                if(game.player1Id === userId){
-                    game.player1 = socket;
-                    console.log(`[Reconnect] Updated player1 socket`);
-                } else if(game.player2Id === userId){
-                    game.player2 = socket;
-                    console.log(`[Reconnect] Updated player2 socket`);
+                
+                // Fetch player info for GAME_STATE (do this first while waiting)
+                const [whiteUser, blackUser] = await Promise.all([
+                    prisma.user.findUnique({ where: { id: game.player1Id }, select: { username: true, rating: true } }),
+                    prisma.user.findUnique({ where: { id: game.player2Id }, select: { username: true, rating: true } })
+                ]);
+
+                const whitePlayer = { name: whiteUser?.username || 'White', rating: whiteUser?.rating || 1200 };
+                const blackPlayer = { name: blackUser?.username || 'Black', rating: blackUser?.rating || 1200 };
+
+                // Small delay to ensure client WebSocket is ready to receive
+                await new Promise(resolve => setTimeout(resolve, 150));
+
+                // Get the CURRENT socket for this user (it may have changed during the delay)
+                const currentSocket = this.users.get(userId);
+                
+                if (!currentSocket || currentSocket.readyState !== WebSocket.OPEN) {
+                    console.log(`[Reconnect] Socket not available after delay, readyState: ${currentSocket?.readyState ?? 'no socket'}`);
+                    return;
                 }
+
+                // Update the game's socket reference with the CURRENT socket (CRITICAL!)
+                if(game.player1Id === userId){
+                    game.player1 = currentSocket;
+                    console.log(`[Reconnect] Updated player1 socket (after delay)`);
+                } else if(game.player2Id === userId){
+                    game.player2 = currentSocket;
+                    console.log(`[Reconnect] Updated player2 socket (after delay)`);
+                }
+                
                 console.log(`[Reconnect] Sending GAME_STATE - Color: ${playerColor}`);
+
                 //Send current game state to the reconnected user
-                socket.send(JSON.stringify({
+                currentSocket.send(JSON.stringify({
                     type: 'GAME_STATE',
                     payload:{
                         gameId: game.gameId,
@@ -149,9 +173,12 @@ export class GameManager {
                         color: playerColor,
                         whiteTime: game.whiteTime,
                         blackTime: game.blackTime,
-                        canAbandon: true
+                        canAbandon: true,
+                        whitePlayer,
+                        blackPlayer
                     }
                 }));
+                console.log(`[Reconnect] GAME_STATE sent successfully`);
             }
         } finally {
             this.reconnecting.delete(userId);
@@ -199,18 +226,25 @@ export class GameManager {
             }
 
             if (message.type === MOVE) {
+                // Find game by userId (more reliable than socket reference)
                 const game = this.games.find(
-                    game => game.player1 === socket || game.player2 === socket
+                    game => game.player1Id === socket.userId || game.player2Id === socket.userId
                 );
                 if (game) {
+                    // Update socket reference if it changed (ensures game has current socket)
+                    if (game.player1Id === socket.userId && game.player1 !== socket) {
+                        game.player1 = socket;
+                    } else if (game.player2Id === socket.userId && game.player2 !== socket) {
+                        game.player2 = socket;
+                    }
                     game.makeMove(socket, message.payload.move);
                 }
             }
 
             if (message.type === ABANDON_GAME) {
-                // Find game in memory first
+                // Find game in memory by userId (more reliable than socket reference)
                 const memoryGame = this.games.find(
-                    game => game.player1 === socket || game.player2 === socket
+                    game => game.player1Id === socket.userId || game.player2Id === socket.userId
                 );
 
                 // Mark game as abandoned in database

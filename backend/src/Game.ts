@@ -54,24 +54,45 @@ export class Game {
         // Save game to database
         this.saveGame();
 
-        // Notify players
-        if (this.player1) {
-            this.player1.send(JSON.stringify({
-                type: INIT_GAME,
-                payload: {
-                    color: 'white',
-                    gameId: this.gameId
-                }
-            }));
-        }
-        if (this.player2) {
-            this.player2.send(JSON.stringify({
-                type: INIT_GAME,
-                payload: {
-                    color: 'black',
-                    gameId: this.gameId
-                }
-            }));
+        // Notify players with user info
+        this.sendInitMessages();
+    }
+
+    // Fetch player info and send INIT_GAME messages
+    private async sendInitMessages() {
+        try {
+            const [whiteUser, blackUser] = await Promise.all([
+                prisma.user.findUnique({ where: { id: this.player1Id }, select: { username: true, rating: true } }),
+                prisma.user.findUnique({ where: { id: this.player2Id }, select: { username: true, rating: true } })
+            ]);
+
+            const whitePlayer = { name: whiteUser?.username || 'White', rating: whiteUser?.rating || 1200 };
+            const blackPlayer = { name: blackUser?.username || 'Black', rating: blackUser?.rating || 1200 };
+
+            if (this.player1) {
+                this.player1.send(JSON.stringify({
+                    type: INIT_GAME,
+                    payload: {
+                        color: 'white',
+                        gameId: this.gameId,
+                        whitePlayer,
+                        blackPlayer
+                    }
+                }));
+            }
+            if (this.player2) {
+                this.player2.send(JSON.stringify({
+                    type: INIT_GAME,
+                    payload: {
+                        color: 'black',
+                        gameId: this.gameId,
+                        whitePlayer,
+                        blackPlayer
+                    }
+                }));
+            }
+        } catch (error) {
+            console.error('Error fetching player info:', error);
         }
     }
 
@@ -234,15 +255,31 @@ export class Game {
     }
 
     async makeMove(socket: WebSocket, move: { from: string; to: string }) {
-        // Validate turn
-        if (this.moveCount % 2 === 0 && socket !== this.player1) {
+        // Get userId from socket
+        const userId = (socket as any).userId;
+        
+        // Validate turn using userId (more reliable than socket reference)
+        const isPlayer1 = userId === this.player1Id;
+        const isPlayer2 = userId === this.player2Id;
+        
+        if (!isPlayer1 && !isPlayer2) {
+            socket.send(JSON.stringify({
+                type: 'ERROR',
+                payload: { message: 'You are not a player in this game' }
+            }));
+            return;
+        }
+        
+        // White's turn (moveCount even) - must be player1
+        if (this.moveCount % 2 === 0 && !isPlayer1) {
             socket.send(JSON.stringify({
                 type: 'ERROR',
                 payload: { message: 'Not your turn' }
             }));
             return;
         }
-        if (this.moveCount % 2 === 1 && socket !== this.player2) {
+        // Black's turn (moveCount odd) - must be player2
+        if (this.moveCount % 2 === 1 && !isPlayer2) {
             socket.send(JSON.stringify({
                 type: 'ERROR',
                 payload: { message: 'Not your turn' }

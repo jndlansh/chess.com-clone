@@ -79,7 +79,7 @@ export const Chessboard = ({ chess, board, socket, playerColor }: {
           }} key={j} className={`w-16 h-16 ${(i + j) % 2 === 0 ? 'bg-[#69923e]' : 'bg-[#fffcb7]'}`}>
             <div className="w-full justify-center flex h-full">
               <div className="h-full justify-center flex flex-col">
-                {square ? <img className='w-9' src={`/${square?.color === "b" ? square?.type : `${square?.type?.toUpperCase()} copy`}.png`} /> : null}
+                {square ? <img className='w-12' src={`/${square?.color === "b" ? square?.type : `${square?.type?.toUpperCase()} copy`}.svg`} /> : null}
               </div>
             </div>
           </div>

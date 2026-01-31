@@ -13,6 +13,7 @@ export class Game {
     spectators = new Set();
     whiteTime; // in milliseconds
     blackTime;
+    status = 'IN_PROGRESS'; // Track game status
     moveCount = 0;
     lastMoveTime;
     timerInterval;
@@ -30,24 +31,43 @@ export class Game {
         this.startTimer();
         // Save game to database
         this.saveGame();
-        // Notify players
-        if (this.player1) {
-            this.player1.send(JSON.stringify({
-                type: INIT_GAME,
-                payload: {
-                    color: 'white',
-                    gameId: this.gameId
-                }
-            }));
+        // Notify players with user info
+        this.sendInitMessages();
+    }
+    // Fetch player info and send INIT_GAME messages
+    async sendInitMessages() {
+        try {
+            const [whiteUser, blackUser] = await Promise.all([
+                prisma.user.findUnique({ where: { id: this.player1Id }, select: { username: true, rating: true } }),
+                prisma.user.findUnique({ where: { id: this.player2Id }, select: { username: true, rating: true } })
+            ]);
+            const whitePlayer = { name: whiteUser?.username || 'White', rating: whiteUser?.rating || 1200 };
+            const blackPlayer = { name: blackUser?.username || 'Black', rating: blackUser?.rating || 1200 };
+            if (this.player1) {
+                this.player1.send(JSON.stringify({
+                    type: INIT_GAME,
+                    payload: {
+                        color: 'white',
+                        gameId: this.gameId,
+                        whitePlayer,
+                        blackPlayer
+                    }
+                }));
+            }
+            if (this.player2) {
+                this.player2.send(JSON.stringify({
+                    type: INIT_GAME,
+                    payload: {
+                        color: 'black',
+                        gameId: this.gameId,
+                        whitePlayer,
+                        blackPlayer
+                    }
+                }));
+            }
         }
-        if (this.player2) {
-            this.player2.send(JSON.stringify({
-                type: INIT_GAME,
-                payload: {
-                    color: 'black',
-                    gameId: this.gameId
-                }
-            }));
+        catch (error) {
+            console.error('Error fetching player info:', error);
         }
     }
     // Static method to restore a game from database state
@@ -62,6 +82,7 @@ export class Game {
         game.spectators = new Set();
         game.whiteTime = options.whiteTime;
         game.blackTime = options.blackTime;
+        game.status = 'IN_PROGRESS';
         game.moveCount = options.moveCount;
         game.lastMoveTime = new Date();
         game.timerInterval = undefined;
@@ -116,6 +137,8 @@ export class Game {
         });
     }
     async timeOut(winner) {
+        // Mark as completed immediately
+        this.status = 'COMPLETED';
         if (this.timerInterval) {
             clearInterval(this.timerInterval);
         }
@@ -192,15 +215,28 @@ export class Game {
         this.spectators.delete(socket);
     }
     async makeMove(socket, move) {
-        // Validate turn
-        if (this.moveCount % 2 === 0 && socket !== this.player1) {
+        // Get userId from socket
+        const userId = socket.userId;
+        // Validate turn using userId (more reliable than socket reference)
+        const isPlayer1 = userId === this.player1Id;
+        const isPlayer2 = userId === this.player2Id;
+        if (!isPlayer1 && !isPlayer2) {
+            socket.send(JSON.stringify({
+                type: 'ERROR',
+                payload: { message: 'You are not a player in this game' }
+            }));
+            return;
+        }
+        // White's turn (moveCount even) - must be player1
+        if (this.moveCount % 2 === 0 && !isPlayer1) {
             socket.send(JSON.stringify({
                 type: 'ERROR',
                 payload: { message: 'Not your turn' }
             }));
             return;
         }
-        if (this.moveCount % 2 === 1 && socket !== this.player2) {
+        // Black's turn (moveCount odd) - must be player2
+        if (this.moveCount % 2 === 1 && !isPlayer2) {
             socket.send(JSON.stringify({
                 type: 'ERROR',
                 payload: { message: 'Not your turn' }
@@ -248,6 +284,8 @@ export class Game {
     }
     async endGame() {
         let result;
+        // Mark as completed immediately
+        this.status = 'COMPLETED';
         if (this.timerInterval) {
             clearInterval(this.timerInterval);
         }
