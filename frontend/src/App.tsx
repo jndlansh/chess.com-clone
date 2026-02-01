@@ -5,6 +5,7 @@ import Game from './screens/Game'
 import Login from './screens/Login'
 import Signup from './screens/Signup'
 import { Navbar } from './components/Navbar'
+import Leaderboard from './screens/Leaderboard'
 
 function App() {
 
@@ -18,6 +19,7 @@ function App() {
             <Route path='/game' element={<Game />} />
             <Route path='/login' element={<Login />} />
             <Route path='/signup' element={<Signup />} />
+            <Route path='/leaderboard' element={<Leaderboard />} />
           </Routes>
         </BrowserRouter>
       </section>

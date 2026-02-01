@@ -4,6 +4,7 @@ import { WebSocketServer } from 'ws';
 import cors from 'cors';
 import { GameManager } from './GameManager.js';
 import authRoutes from './routes/auth.js';
+import leaderboardRoutes from './routes/leaderboard.js';
 import { verifyToken } from './auth.js';
 
 const app = express();
@@ -14,6 +15,7 @@ app.use(express.json());
 
 // Routes
 app.use('/auth', authRoutes);
+app.use('/leaderboard', leaderboardRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

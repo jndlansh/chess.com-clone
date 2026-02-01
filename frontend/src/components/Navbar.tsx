@@ -27,6 +27,11 @@ export const Navbar = () => {
                     onClick={() => navigate('/game')}
                 />
                 <NavItem 
+                    icon="🏆" 
+                    label="Leaderboard" 
+                    onClick={() => navigate('/leaderboard')}
+                />
+                <NavItem 
                     icon="🧩" 
                     label="Puzzles" 
                     onClick={() => {}}
